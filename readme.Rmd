@@ -1,0 +1,63 @@
+---
+output:
+  rmarkdown::github_document
+---
+
+Power Analysis for Social Science Research 
+================
+Denis Cohen  
+<denis.cohen@uni-mannheim.de>
+
+Alexander Wenz  
+<a.wenz@uni-mannheim.de>
+
+*Version: MZES Social Science Data Lab, 2023-12-06*
+
+## Abstract
+
+Power analysis is an essential component of designing experiments. It helps researchers to allocate sufficient resources to data collection, finding the balance between too small and too large N, and is often required for grant proposals. In this workshop, we will first talk about the basics of power calculations and discuss practical considerations. We will then give hands-on-examples on analytical power calculations using the software G*Power, the R package pwr, and will show how to calculate power with simulations.
+
+## Using the workshop materials
+
+The workshop materials come as [`learnr`](https://rstudio.github.io/learnr/) tutorials wrapped in an R package. To download, install, and use the interactive materials, run the following code:
+
+```{r, eval = FALSE}
+# Detach if loaded
+if ("poweranalysis" %in% (.packages())) {
+  detach(package:poweranalysis, unload = TRUE)
+}
+
+# Uninstall if installed
+if ("poweranalysis" %in% installed.packages()) {
+  remove.packages("poweranalysis")
+}
+
+# Install if not installed
+if (!("devtools" %in% installed.packages())) {
+  install.packages("devtools")
+}
+
+# Load from GitHub
+library(devtools)
+devtools::install_github("socialsciencedatalab/poweranalysis")
+
+# Load to library
+library(poweranalysis)
+
+# Run tutorials
+learnr::run_tutorial("intro", package = "poweranalysis")
+learnr::run_tutorial("power-simulations", package = "poweranalysis")
+learnr::run_tutorial("conjoint-short", package = "poweranalysis")
+```
+
+## About the Instructors
+
+Denis Cohen is a senior research fellow in the Data and Methods Unit at the [Mannheim Centre for European Social Research
+(MZES)](https://www.mzes.uni-mannheim.de/), [University of
+Mannheim](https://www.uni-mannheim.de/). He is also lead organizer of the [MZES
+Social Science Data
+Lab](https://www.mzes.uni-mannheim.de/socialsciencedatalab/page/events/) and co-editor of the blog [Methods
+Bites](https://www.mzes.uni-mannheim.de/socialsciencedatalab/).
+A political scientist by training, his substantive work focuses on the political economy of spatial inequalities, political preferences and voting behavior, strategic elite behavior, and political competition in consolidated multiparty democracies. His methodological interests include advanced statistical modeling, georeferenced data, data visualization, and causal inference.
+
+Alexander Wenz is a research fellow in the Data and Methods Unit at the [Mannheim Centre for European Social Research (MZES)](https://www.mzes.uni-mannheim.de/), [University of Mannheim](https://www.uni-mannheim.de/). He is also a Research Associate at the [Institute for Social and Economic Research (ISER)](https://www.iser.essex.ac.uk/) at the University of Essex. He is co-organizer of the [MZES Social Science Data Lab](https://www.mzes.uni-mannheim.de/socialsciencedatalab/page/events/), co-editor of the blog [Methods Bites](https://www.mzes.uni-mannheim.de/socialsciencedatalab/), and serves as Committee Member of the [European Survey Research Association (ESRA)](https://www.europeansurveyresearch.org/). His research examines the quality of novel methods of data collection, with a focus on mobile web surveys, smartphone apps, wearable sensors, and digital behavioral data.

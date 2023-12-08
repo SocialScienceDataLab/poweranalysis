@@ -1,0 +1,428 @@
+---
+title: "Power analysis for forced-choice conjoint experiments"
+output: 
+  learnr::tutorial:
+    progressive: true
+    allow_skip: true
+    css: css/learnr-theme.css
+runtime: shiny_prerendered
+---
+  
+```{r setup, include=FALSE}
+## --- learnr ---
+if ("learnr" %in% (.packages()))
+  detach(package:learnr, unload = TRUE)
+library(learnr)
+
+## ---- Chunk options ---
+knitr::opts_chunk$set(echo = FALSE)
+
+## ---- Other packages ----
+pacman::p_load(
+  dplyr,
+  tidyr,
+  purrr,
+  estimatr,
+  knitr,
+  devtools,
+  cjpowR,
+  tibble
+)
+
+options(knitr.duplicate.label = "allow")
+```
+
+## Disclaimers
+
+### Current state of affairs: Power analysis
+
+Power analysis for conjoint experiments is a moving target.
+
+Since 2020, there have been at least four working papers/online tutorials on the issue:
+
+1. [Gall, Brett J. 2020. *"Simulation-based Power Calculations for Conjoint Experiments."* OSF Preprints. October 6.](https://osf.io/bv6ug/)
+1. [Stefanelli, Alberto, and Martin Lukac. 2020. *"Subjects, Trials, and Levels: Statistical Power in Conjoint Experiments."* SocArXiv. November 18.](https://osf.io/preprints/socarxiv/spkcy/)
+1. [Schuessler, Julian, and Markus Freitag. 2020. *"Power Analysis for Conjoint Experiments."* SocArXiv. December 16.](https://osf.io/preprints/socarxiv/9yuhp/)
+1. [Kubinec, Robert. 2022. *"Simulating Conjoint Survey Experiments: Power Curves, Clustered Errors, Type S and Type M Error Rates."* https://www.robertkubinec.com/. February 4.](https://www.robertkubinec.com/post/conjoint_power_simulation/) *[Note: Only covers rating-based conjoints]*
+
+All of them focus on power analysis for the average marginal component effect (AMCE) or the average marginal component interaction effect (AMCIE).
+
+### Current state of affairs: Applied conjoint analysis
+
+Conjoint analysis itself is a moving target. Here are some recent (and ongoing) debates.
+
+1. [Zhirkov, Kirill. 2022. *"Estimating and Using Individual Marginal Component Effects from Conjoint Experiments."* Political Analysis 30(2): 236-249.](https://www.cambridge.org/core/journals/political-analysis/article/estimating-and-using-individual-marginal-component-effects-from-conjoint-experiments/FE284F17AB91A18673CC33276FF45D34) 
+1. [de la Cuesta, Brandon, Naoki Egami and Kosuke Imai. 2022. *"Improving the External Validity of Conjoint Analysis: The Essential Role of Profile Distribution"* Political Analysis 30(1): 19-45.](https://www.cambridge.org/core/journals/political-analysis/article/improving-the-external-validity-of-conjoint-analysis-the-essential-role-of-profile-distribution/B911EF14513292A24ECB4AC4BAA3FA6B)
+1. [Abramson, Scott. F., Korhan Kocak and Asya Magazinnik. 2022. *"What Do We Learn about Voter Preferences from Conjoint Experiments?"* American Journal of Political Science, 66: 1008-1020.](https://onlinelibrary.wiley.com/doi/full/10.1111/ajps.12714) 
+1. [Bansak, Kirk, Jens Hainmueller, Daniel J. Hopkins and Teppei Yamamoto.2022. *"Using Conjoint Experiments to Analyze Election Outcomes: The Essential Role of the Average Marginal Component Effect."* Political Analysis.](https://www.cambridge.org/core/journals/political-analysis/article/using-conjoint-experiments-to-analyze-election-outcomes-the-essential-role-of-the-average-marginal-component-effect/0B7D820F9775C9B19D800BF9B088C358) 
+1. [Ganter, Flavien. 2023. *"Identification of Preferences in Forced-Choice Conjoint Experiments: Reassessing the Quantity of Interest."* Political Analysis, 31(1): 98-112.](https://www.cambridge.org/core/journals/political-analysis/article/identification-of-preferences-in-forcedchoice-conjoint-experiments-reassessing-the-quantity-of-interest/E6C7719AD2EF30514C2EC4396FD0D928) 
+1. [Katherine Clayton, Yusaku Horiuchi, Aaron R. Kaufman, Gary King, and Mayya Komisarchik. Working Paper. *"Correcting Measurement Error Bias in Conjoint Survey Experiments".](https://gking.harvard.edu/conjointE).
+
+5/6 contribution focus on estimands (quantities of interest).
+
+4/6 challenge the conventional use of and focus on the AMCE.
+
+Consequently, there is increasing demand to catch up on power analysis for estimands other than the AMCE.
+
+
+## Binary forced choice conjoints
+
+### Profiles: Notation
+
+- A profile $p$ is a factorial combination of $C$ *components*
+- Each component $X_{c}$ is a random draw from $L_c \geq 2$ *levels* of *attribute* $X_c$, $c \in \{1,...,C\}$
+- We denote a realization of $X_{c}$ with level $l \in \{1,..., L_c\}$ as $x_{cl}$
+- Without constraints on component combinations, there are $P = \prod_{l=c}^{C} L_c$ unique profiles
+
+### An Example: Student choices of hypothetical electives
+
+- $X_1 \in \{\text{Instructor 1}, \text{Instructor 2}, \text{Instructor 3}\}$, $L_1 = 3$
+- $X_2 \in \{\text{Topic 1}, \text{Topic 2}\}$, $L_2 = 2$
+- In this $3 \times 2$ design, there are $6$ unique combinations
+
+### The choice task
+
+- Each respondent $i = 1,..., N$ evaluates up to $J$ unique *sets of $K$ profiles*, $p_{ijk}$
+- In the simplest case, respondents evaluate profile pairs, i.e., $K=2$
+- E.g., the first respondent in the first choice tasks compares $p_{111}$ and $p_{112}$, $p_{111} \neq p_{112}$
+- Respondents have to make a forced binary choice: $Y_{ij1}, Y_{ij2} \in \{0, 1\}$, $Y_{ij1} \neq Y_{ij2}$
+
+### Example
+
+```{r example-data}
+example_data <- tibble(
+  `Respondent (i)` = c(1, 1, 1, 1, 1, 1),
+  `Task (j)` = c(1, 1, 2, 2, 3, 3),
+  `Position (k)` = rep(1:2, 3),
+  `Instructor (X1)` = c("Instructor 1", "Instructor 2", "Instructor 3", "Instructor 1", "Instructor 2", "Instructor 3"),
+  `Topic (X2)` = c(
+    "Topic 1",
+    "Topic 2",
+    "Topic 2",
+    "Topic 2",
+    "Topic 1",
+    "Topic 2"
+  ),
+  `Preferred Course (Y)` = c(0, 1, 1, 0, 0, 1)
+)
+
+example_data %>%
+  knitr::kable()
+```
+
+## Estimands and Estimators
+
+Using somewhat simplified notation akin to [Bansak et al. (2022)](https://www.cambridge.org/core/journals/political-analysis/article/using-conjoint-experiments-to-analyze-election-outcomes-the-essential-role-of-the-average-marginal-component-effect/0B7D820F9775C9B19D800BF9B088C358), we can define some central estimands:
+
+### Marginal means
+
+From [Leeper et al. (2020)](https://www.cambridge.org/core/journals/political-analysis/article/measuring-subgroup-preferences-in-conjoint-experiments/4F2C21AC02753F1FFF2F5EA0F943C1B2): 
+
+A marginal mean describes the level of favorability toward profiles that have a particular feature level, ignoring [i.e., averaging over] all other features.
+
+$$MM_{x_{1l}} = \mathbb{E}[Y_i([x_{1l}, X_2], [X_1, X_2])]$$
+
+### Average marginal component effect (ACME)
+
+The AMCE represents the marginal effect of a component (here: the first difference of component $x_{1l}$ vs. $x_{1l^{\prime}}$), averaged over the joint distribution of the remaining features (see, e.g., [Hainmueller et al., 2014](https://www.cambridge.org/core/journals/political-analysis/article/causal-inference-in-conjoint-analysis-understanding-multidimensional-choices-via-stated-preference-experiments/414DA03BAA2ACE060FFE005F53EFF8C8)):
+
+$$AMCE_{x_{1l},x_{1l^{\prime}}} = \mathbb{E}[\underbrace{Y_i(\underbrace{[x_{1l}, X_2]}_{p_{1}}, \underbrace{[X_1, X_2])]}_{p_{2}}}_{\text{marginal mean} \\ \text{hypothetical }X_1 = x_{1l}} - \underbrace{Y_i(\underbrace{[x_{1l^{\prime}}, X_2]}_{p_{1}^{\prime}}, \underbrace{[X_1, X_2]}_{p_{2}^{\prime}})}_{\text{marginal mean}  \\ \text{hypothetical }X_1 = x_{1l^{\prime}}}]$$
+
+where "the expectation is defined over the joint distribution of [features] from which all [features] other than [$X_1$] for the first [profile] are drawn, and the sampling distribution of the $N$ respondents from the target population (Bansak et al., 2022).
+
+###  Conditional average marginal component effect (CAMCE)
+
+Conditional AMCEs address questions of the differential attractiveness of a feature level conditional on the value of another feature level (causal interaction) or respondent trait (non-causal effect heterogeneity).
+
+Here, we are interested in $AMCE_{x_{1l} \text{ vs } x_{1l^{\prime}}}$, conditional on $X_2 = x_{2l}$:
+
+$$CAMCE_{x_{1l},x_{1l^{\prime}}|x_{2l}} = \mathbb{E}[Y_i([x_{1l}, x_{2l}], [X_1, X_2])] - Y_i([x_{1l^{\prime}}, x_{2l}], [X_1, X_2])]$$
+
+With profiles consisting of more than two components, $C > 2$, we would be averaging over all other features.
+
+
+### Average causal interaction effect (ACIE)
+
+The ACIE is a causal quantity of interest closely related to the conditional AMCE.
+
+A difference-in-differences estimand, it describes the differences in the AMCE of one feature that results from a change in levels of another feature:
+
+$$ACIE_{x_{1l},x_{1l^{\prime}} |x_{2l}, x_{2l^{\prime}}} = \\ \mathbb{E}[Y_i([x_{1l}, x_{2l}], [X_1, X_2])] - Y_i([x_{1l^{\prime}}, x_{2l}], [X_1, X_2]) \\ - \{ Y_i([x_{1l}, x_{2l^{\prime}}], [X_1, X_2])] - Y_i([x_{1l^{\prime}}, x_{2l^{\prime}}], [X_1, X_2]) \}]$$
+
+### Cell means
+
+"Cell means are the mean outcome for each particular combination of feature levels" [Leeper et al. (2020)](https://www.cambridge.org/core/journals/political-analysis/article/measuring-subgroup-preferences-in-conjoint-experiments/4F2C21AC02753F1FFF2F5EA0F943C1B2).
+
+They give the average popularity of a fully specified profile $[x_{1l}, x_{2l}]$, averaging over the distribution of all contestant profiles $[X_1, X_2]$.
+
+$$CM_{x_{1l}, x_{2l}} = \mathbb{E}[Y_i([x_{1l}, x_{2l}], [X_1, X_2])]$$
+
+### Uncertainty estimation
+
+- [Hainmueller et al. (2014)](https://www.cambridge.org/core/journals/political-analysis/article/causal-inference-in-conjoint-analysis-understanding-multidimensional-choices-via-stated-preference-experiments/414DA03BAA2ACE060FFE005F53EFF8C8) propose adjusting for within-respondent-clustering of tasks and choices using either
+    - clustered robust standard errors at the respondent-level (implemented in [`cjoint`](https://cran.r-project.org/web/packages/cjoint/cjoint.pdf))
+    - block bootstrapping at the respondent-level
+- [Schuessler and Freitag (2020)](https://osf.io/preprints/socarxiv/9yuhp/), pointing to [Abadie et al. (2023)](https://academic.oup.com/qje/article/138/1/1/6750017)
+    - refute the necessity of clustering
+    - show that doing so is inconsequential for AMCE standard errors/confidence intervals in eight highly cited conjoint studies
+- [Kubinec (2022)](https://www.robertkubinec.com/post/conjoint_power_simulation/) shows that clustered SEs really make no difference, unless sample size is very low
+- The benefit: By foregoing clustering, one can use unadjusted estimates of the variance-covariance matrix of OLS coefficients for simple closed-form (analytical) power calculations for (conditional) AMCEs  (Schuessler and Freitag, 2020)
+
+
+## Closed-form power analysis
+
+*Note:* Discussion based on [Schuessler and Freitag (2020, Section 3.1)](https://osf.io/preprints/socarxiv/9yuhp/)
+
+### Preliminaries
+
+- Effective number of observations: $N^{\text{eff}} = N \times J \times K$ (Respondents $\times$ tasks $\times$ size of profile sets)
+- $N$, $J$, and $K$ affect power
+- $C$ (number of features) does not affect the power of AMCE estimates, because $X_c \perp X_{c^{\prime}}$
+- $L_c$ (number of levels of features) affects power, because in expectation, respondents get to evaluate $N^{\text{eff}}/L_c$ profiles containing component $x_{cl}$
+
+### A little twist on OLS estimation of AMCEs
+
+The usual estimation framework for forced-choice conjoints involves OLS estimation, e.g.,
+
+$$Y = \alpha + \beta_1 \text{Instructor 2} + \beta_2 \text{Instructor 3} + \epsilon$$
+
+Consider the trichotomous feature $X_1 \in \{\text{Instructor 1}, \text{Instructor 2}, \text{Instructor 3}\}$, and suppose our quantity of interest is $AMCE_{\text{Instructor 2 vs Instructor 1}}$:
+
+- In expectation, each of the $L_1 = 3$ levels will appear $N^{\text{eff}}/3$ times.
+- Estimation of the AMCE (pairwise first difference) via OLS will effectively ignore observations with the third level
+- The estimation task is thus equivalent to a $Y = \tau_0 + \tau_1 \text X_{1}^{\ast} + \epsilon$, where $X_{1}^{\ast} = 1 \text{ if } X_1 = \text{Instructor 2}$ and $X_{1}^{\ast} = 0 \text{ if } X_1 = \text{Instructor 1}$
+- Estimated on a subset of size $\approx \frac{2}{3} N^{\text{eff}}$, excluding approx. one third of observations where $X_1 = \text{Instructor 3}$
+- Here, due to simple randomization of feature levels, $\Pr(X_{1}^{\ast} = 0) \approx \Pr(X_{1}^{\ast} = 1) \approx 0.5$
+
+### The variance of the AMCE
+
+With the setup above, we can derive the maximum variance of $\hat{\beta}_1$ as
+
+$$\text{Var}(\hat{\tau}_1) = \frac{2}{L_1} N^{\text{eff}} \left(\frac{\text{Var}(Y_{ijk} | X_{1{ijk}}^{\ast} = 1)}{0.5} + \frac{\text{Var}(Y_{ijk} | X_{1{ijk}}^{\ast} = 0)}{0.5}\right) $$
+
+Since $Y$ is binary, we can re-express the variance terms as variances of proportions, $\text{Var}(p) = p (1-p)$.
+
+Using linear combinations of the estimated coefficients, we get  $\text{Var}(Y_{ijk} | X_{1{ijk}}^{\ast} = 1) = (\tau_0 + \tau_1) (1 - (\tau_0 + \tau_1))$ and $\text{Var}(Y_{ijk} | X_{1{ijk}}^{\ast} = 0) = \tau_0 (1 - \tau_0)$.
+
+The variance then only depends on four inputs: $L_1$, $N^{\text{eff}}$, and estimates $\hat{\tau}_0$ and $\hat{\tau}_1$.
+
+### Power calculations
+
+Assume that the AMCE $\hat{\tau}_1$ has a normal sampling distribution with variance $\text{Var}(\hat{\tau}_1)$ as specified above.
+
+With type I error probability $\alpha$ and type II error probability $\beta$, we can then solve for $N^{\text{eff}}$:
+
+$$N^{\text{eff}} = \frac{L_1}{2} \frac{\left( \Phi^{-1}(1-\frac{\alpha}{2}) + \Phi^{-1}(1 - \beta)\right) ^ 2}{\tau_1 ^ 2} \left( \frac{(\tau_0 + \tau_1) (1 - (\tau_0 + \tau_1)) + \tau_0 (1 - \tau_0)}{0.5} \right)$$
+
+$\Phi^{-1}()$ ist the inverse standard normal CDF (quantile function). For instance, if $\alpha = 0.05$, $\Phi^{-1}(1-\frac{\alpha}{2}) \approx 1.96$.
+
+We now make the conservative assumption of $\hat{\tau}_0 = 0.5$, which maximizes $\text{Var}(Y_{ijk} | X_{1{ijk}}^{\ast} = 0)$.
+
+### Required $N^{\text{eff}}$ and $N$, given $\alpha$, $\beta$ and $\tau_1$
+
+Suppose we set $\alpha = 0.05$ and $\beta = 0.2$. We know $L_1 = 3$. We get:
+
+$$N^{\text{eff}} \approx \frac{3}{2} \frac{\left( 1.96 + 0.84 \right) ^ 2}{\tau_1 ^ 2} \left( \frac{(0.5 + \tau_1) (0.5 - \tau_1) + 0.5^2}{0.5} \right)\\ \approx \frac{11.77}{\tau_1 ^ 2} \left(1 -  2 \tau_1^2 \right) \\ \approx \frac{11.77}{\tau_1^2} - 23.54$$
+
+which allows us to retrieve the required number of *effective* observations as a function of our a priori expectations for the AMCE, $\tau_1$.
+
+The number of *respondents* is then simply
+
+$$N = \frac{N^{\text{eff}}}{JKL_1} = \frac{N^{\text{eff}}}{2 \times 3 \times 3} = \frac{N^{\text{eff}}}{18}$$
+
+
+### Software implementation
+
+Schuessler and Freitag provide an R package [`cjpowR`](https://github.com/m-freitag/cjpowR):
+
+```{r install-cjpowr, eval = FALSE}
+devtools::install_github("m-freitag/cjpowR")
+```
+
+### Calculate required sample size
+
+```{r cjpowr-n, exercise = TRUE}
+cjpowR::cjpowr_amce(
+  amce = 0.05,
+  alpha = 0.05,
+  power = 0.8,
+  levels = 3,
+  n = NULL
+)
+```
+
+### Calculate power
+
+```{r cjpowr-p, exercise = TRUE}
+n_levels <- 3L
+n_respondents <- 200L
+n_tasks <- 3L
+n_choices <- 2L
+
+cjpowR::cjpowr_amce(
+  amce = 0.05,
+  alpha = 0.05,
+  power = NULL,
+  levels = n_levels,
+  n = n_respondents * n_tasks * n_choices * n_levels
+)
+```
+
+### Power curves
+
+```{r cjpowr-plot, exercise = TRUE}
+n_eff <- seq(500, 15000, 250)
+lapply(n_eff, function (n) {
+  cjpowR::cjpowr_amce(
+    amce = 0.05,
+    alpha = 0.05,
+    power = NULL,
+    levels = 3,
+    n = n
+  )
+}) %>%
+  dplyr::bind_rows() %>%
+  ggplot2::ggplot(
+    ggplot2::aes(x = n,
+                 y = power) 
+  ) +
+  ggplot2::geom_line()
+```
+
+### ShinyApp
+
+<p align="center">
+  <iframe width="1000" height="500" src="https://markusfreitag.shinyapps.io/cjpowr/" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen scrolling="no">
+  </iframe>
+</p>
+
+### Limitations (few, but notable)
+
+Derivation and implementation only pertain to:
+
+1. binary forced-choice designs -- no rating-based conjoints, no multinomial forced choices
+1. AMCEs and CAMCEs -- no MMs, CMs, or 'funky' functions thereof
+
+### Key take-aways
+
+What we learn from Schuessler and Freitag: 
+
+- We can treat power analysis for any *single* pairwise AMCE as a difference-in-means/difference-in-proportions estimated via linear regression on a subset of the data.
+- Details aside, power analysis for a singular AMCE is therefore widely analogous to power analysis for the ATE with a difference-in-means estimator.
+
+If *all* AMCE (and perhaps, ACIE) are of interest:
+
+- Conduct AMCE/ACIE power analyses for all features, and all pairwise difference of feature levels within each feature (and, possibly, all pairwise feature-level interactions)
+- Get a distribution of required sample sizes
+    - Choose the maximum to be safe
+    - Or subject your choice to financial budget constraints
+
+
+## Simulation-based power analysis
+
+### The approach
+
+[Gall (2020)](https://osf.io/bv6ug/) nicely maps out the simulation approach: 
+
+1. Create data based on proposed values for parameters describing the main structure of the experiment
+    a. number of study participants,
+    a. choice tasks per participant, and 
+    a. number of profiles per choice task.
+1. Create profile attributes and attribute levels.
+1. Create dummy variables for each profile attribute level.
+1. Assign potential outcomes to different profile combinations.
+1. Reveal realized outcome for each observation in light of the assigned attributes and interdependence of outcomes for each set of profiles.
+1. Estimate model(s), save p-value(s) and point estimate(s).
+1. Repeat for many simulated data sets.
+1. Calculate power from model results.
+
+At a glance:
+
+- Steps 1-3 involve (relatively) straightforward generations of artificial RHS data.
+- Steps 4-5 involve fairly intricate simulations of the *data-generating process* for forced-choice tasks.
+- Steps 6-8 follow standard approaches to conjoint analysis
+
+### Simulating the data-generating process
+
+Due to the forced-choice design, outcomes within each choice task are deterministically correlated. When $Y_{ijk} = 1$, we know that $Y_{ijk^{\prime}} = 0$.
+
+Next to the binary forced-choice design, multiple treatments and higher-order causal interactions complicate simulations of the data-generating process.
+
+### Gall (2020)
+
+*For each task, we will begin by assigning one profile the value $p=0.50$, which is the expected value of $p$ when participants are indifferent between the two profiles in a choice task. Next, we will add the effects of differences in attribute values across profiles to the expected outcome for that profile. For example, if we think $(p|A=1)−(p|A=0)=0.10$, and have a profile $X$  where $A_x=1$ and a profile $Z$ where $A_z=0$, we would draw $Y_x$ -- the outcome for profile $X$ -- from $\text{Binomial}(1, 0.55)$ and let $Y_z = 1 − Y_x$.*
+
+This approach requires:
+
+- Full prior expectations about all higher-order interactions
+- A re-expression of forced choices as a binary choice for Profile 1, given relative cross-profile *differences* in choice probabilities
+
+### Example
+
+Assume:
+
+- AMCE of Topic 2 vs Topic 1 is 0.15
+- AMCE of Instructor 2 vs Instructor 1 is 0.1
+- ACIE of Topic 2 $\times$ Instructor 2 is 0.05
+
+Then, the data-generating process for a profile comparison of $Y_{ij1} | X_{1ij1} = \text{Topic 2}, X_{2ij1} = \text{Instructor 2}$ vs  $Y_{ij2} | X_{1ij2} = \text{Topic 1}, X_{2ij2} = \text{Instructor 1}$ for the $j^{th}$ task of respondent $i$ can be expressed as
+
+$$
+Y_{ij1}^{\text{sim}} \sim \text{Bernoulli} \left(\Pr(Y_{ij1} |  X_{1ij1},  X_{1ij2},  X_{2ij1},X_{2ij2})\right) \\
+Y_{ij2}^{\text{sim}} = 1 - Y_{ij1}^{\text{sim}}
+$$
+
+$$\Pr(Y_{ij1} |  X_{1ij1},  X_{1ij2},  X_{2ij1},X_{2ij2}) \\= 0.5 + \frac{0.15}{2} \times (X_{1ij1} - X_{1ij2}) + \frac{0.1}{2} \times (X_{2ij1} - X_{2ij2})  + \frac{0.05}{2} \times (X_{1ij1} - X_{1ij2})  \times (X_{2ij1} - X_{2ij2})\\
+= 0.65$$
+
+
+### Stefanelli and Lukac (2020)
+
+[Stefanelli and Lukac (2020)](https://osf.io/preprints/socarxiv/spkcy/) propose an alternative:
+
+- Simulate within-profile selection probabilities based on a linear probability models for *both profiles* (where coefficients reflect a priori expectations about unconditional choice probabilities)
+- Construct relative choice probabilities for forced-choice contest
+
+Example:
+
+- $\Pr(Y_{ij1} | X_{ij1}) = 0.4$ $\rightarrow$ odds are 2:3
+- $\Pr(Y_{ij2} | X_{ij2}) = 0.8$ $\rightarrow$ odds are 4:1
+- Odds ratio of choosing Profile 1 over Profile 2 is $1/6$
+- Probability of choosing Profile 1 over Profile 2 is $\Pr(Y_{ij1} | X_{ij1}, X_{ij2}) = \frac{1/6}{1 + 1/6} \approx .143$
+
+### ShinyApp
+
+<p align="center">
+  <iframe width="1000" height="500" src="https://mblukac.shinyapps.io/conjoints-power-shiny/" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen scrolling="no">
+  </iframe>
+</p>
+
+
+### Elephant(s) in the room: A priori expectations about (C)AMCEs
+
+How can we arrive at a priori expectations about the signs and magnitudes of (C)AMCEs?
+
+- We know AMCEs in forced-choice designs are always in $(-1, 1)$ (excluding the boundaries).
+- Schuessler and Freitag (2020) show that the median absolute AMCEs of various components in 15 highly studies is about $0.05$ (55-45, 45-55).
+- But absolute AMCEs range from $0.00$ (50-50) to nearly $0.35$ (67.5-32.5)
+
+So for a single (conditional) AMCE, we face a problem similar to that with a single ATE in simple RCTs (not trivial, but manageable).
+
+#### Elephant(s) in the room:  A priori expectations about the full DGP
+
+Inference with respect to *cell means* requires knowledge of *all* parameters that determine the data-generating process.
+
+This would be relevant, e.g., for testing a hypotheses like
+
+- "Topic 1 taught by Instructor 1 has a choice probability of at most 40%."
+- "Power analysis taught by Instructor 3 is on average twice as popular as Topic 1 taught by Instructor 1."
+
+Leaving any parameters unspecified brings about problems for valid simulation of the data-generating process.
+
+### Main take-aways
+
+- As of today, no authoritative publication on simulation-based power analysis for forced-choice conjoint.
+- The forced-choice design severely complicates a straightforward implementation of the data-generating process.
+- So far, strong focus on AMCEs and ACIEs. But that's bound to change.
+- A key question is if we can ever plausibly formulate a priori expectations for all parameters that govern the data-generating process (AMCEs, ACIEs, higher-order interaction terms).
+

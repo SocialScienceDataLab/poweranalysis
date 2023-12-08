@@ -1,0 +1,321 @@
+---
+title: "Power simulations in RCTs"
+output: 
+  learnr::tutorial:
+    progressive: true
+    allow_skip: true
+    css: css/learnr-theme.css
+runtime: shiny_prerendered
+---
+  
+```{r setup, include=FALSE}
+## --- learnr ---
+if ("learnr" %in% (.packages()))
+  detach(package:learnr, unload = TRUE)
+library(learnr)
+
+## ---- Chunk options ---
+knitr::opts_chunk$set(echo = FALSE)
+
+## ---- Other packages ----
+pacman::p_load(
+  dplyr,
+  randomizr
+)
+
+options(knitr.duplicate.label = "allow")
+```
+
+## The gist
+
+### Approach
+
+1. Start iteration $s$ by simulating realistic right-hand side data subject to design choices
+1. Set "true" parameter values and simulate the data-generating process for the outcome subject to design choices
+1. Apply an estimator to get (an) estimate(s) of your target estimand(s)
+1. Recover the $p$-value(s) of your estimate(s)
+1. Logically evaluate if $p < \alpha$ and store the result as $b_s$, where $b_s = \mathbb{1}\{p < \alpha\}$
+1. Reiterate steps 1-5 $S$ times
+1. Average over the length-$S$ vector $\mathbf{b}$ to obtain the proportion of statistically significant estimates
+
+The result is your simulation-based power estimate.
+
+### The benefits of using simulation: Flexibility
+
+- Step 1 allows you to incorporate design choices and data structures of any level of complexity
+    - variants of random assignment (simple/complete/block/clustered)
+    - binary, multi-categorical, and continuous treatments
+    - multiple levels of grouping/clustering
+- Step 2 allows you to incorporate details of the data-generating process of any complexity
+    - binary, multi-categorical, ordered, (bounded) continuous, count outcomes
+    - heterogeneous effects
+- Step 3 allows you to flexibly choose an estimator to estimate feasible quantities of interest
+
+## Power simulation I
+
+### Setup: A simple RCT
+
+We will illustrate the workflow using a basic RCT with a binary treatment $D \in \{0,1\}$, assigned via complete random assignment with $\pi=0.5$, and continuous outcomes $Y$.
+
+You know from estimates based on existing data that the mean in your target population is $\mu_0 = 1.0$, with standard deviation $\sigma_0 = 0.75$.
+
+You expect that receipt of your treatment will, on average, increase $Y$ by 0.2 points, thus $\tau = 0.2$.
+
+### Implementation
+
+We will parameterize this scenario through a linear model:
+
+$$Y = \alpha + \tau D +\epsilon \\
+\epsilon\sim \text{Normal}(0, \sigma_0^2)$$
+
+where $\alpha = 1.0$, $\tau = 0.2$, and $\sigma_0 = 0.75$.
+
+### Code
+
+```{r power-sim-1, echo = T}
+power_sim <- function(N,
+                      mu_0 = 0,
+                      tau = 0,
+                      sigma_0 = 1,
+                      pi = 0.5,
+                      alpha = 0.05,
+                      n_sim = 1000L,
+                      seed = 20230213L) {
+  # Set seed
+  set.seed(seed)
+  
+  # Replicate simulations -- everything inside {} -- n_sim times
+  num_sig <- replicate(n_sim, {
+    # Generate potential outcomes
+    Y0 <- rnorm(N, mu_0, sigma_0)
+    Y1 <- Y0 + tau
+    
+    # Custom treatment assignment
+    D <- randomizr::complete_ra(N, prob = pi)
+    
+    # Revealed outcomes
+    Y <- dplyr::if_else(D == 1, Y1, Y0)
+    
+    # Custom inference method: OLS
+    est <- lm(Y ~ D)
+    
+    # Extract and return p-value
+    (summary(est)$coefficients["D", "Pr(>|t|)"] < alpha) %>%
+      return()
+  })
+  
+  # Return power (proportion of significant findings)
+  return(mean(num_sig))
+}
+```
+
+```{r power-sim-function-1}
+power_sim <- function(N,
+                      mu_0 = 0,
+                      tau = 0,
+                      sigma_0 = 1,
+                      pi = 0.5,
+                      alpha = 0.05,
+                      n_sim = 1000L,
+                      seed = 20230213L) {
+  # Set seed
+  set.seed(seed)
+  
+  # Replicate simulations -- everything inside {} -- n_sim times
+  num_sig <- replicate(n_sim, {
+    # Generate potential outcomes
+    Y0 <- rnorm(N, mu_0, sigma_0)
+    Y1 <- Y0 + tau
+    
+    # Custom treatment assignment
+    D <- randomizr::complete_ra(N, prob = pi)
+    
+    # Revealed outcomes
+    Y <- dplyr::if_else(D == 1, Y1, Y0)
+    
+    # Custom inference method: OLS
+    est <- lm(Y ~ D)
+    
+    # Extract and return p-value
+    (summary(est)$coefficients["D", "Pr(>|t|)"] < alpha) %>%
+      return()
+  })
+  
+  # Return power (proportion of significant findings)
+  return(mean(num_sig))
+}
+```
+
+### Application: Power for a given $N$
+
+```{r power-calc-apply-rct-1, exercise = T, exercise.setup = "power-sim-function-1"}
+power_sim(
+  N = 1500L,
+  mu_0 = 1,
+  sigma_0 = 0.75,
+  tau = 0.2
+)
+```
+
+### Application: Power for a sequence of $N$
+
+```{r power-calc-seq-1, exercise = T, exercise.timelimit = 120, exercise.setup = "power-sim-function-1"}
+## Sample size sequence
+N_seq <- seq(100, 1000, 100)
+
+## Apply function sequentially
+power <- sapply(N_seq, function(N) {
+  power_sim(
+  N = N,
+  mu_0 = 1,
+  sigma_0 = 0.75,
+  tau = 0.2,
+  n_sim = 500L
+)
+})
+
+## View output
+dplyr::bind_cols(
+  N = N_seq,
+  power = power
+)
+```
+
+
+## Power simulation II
+
+### Setup: A slightly more intricate RCT
+
+Upon closer inspection of your pilot study, you realize that receipt of the treatment not only results in a positive shift in $Y$ but also increases the variance of $Y$.
+
+You therefore decide you want to estimate your final models with heteroskedasticity-robust standard errors.
+
+
+### Implementation
+
+This time, we parameterize the data-generating process in terms of group-specific means and variances:
+
+- $\mu_0 = 1.0$, $\sigma_0 = 0.75$ in the control group
+- $\mu_1 = 1.2$, $\sigma_1 = 1.25$ in the treatment group.
+
+We recover our estimate of the ATE, $\hat{\tau}$, via OLS, stipulating a linear model of the form $Y = \mu_0 + \tau D + \epsilon$.
+
+### Code
+
+```{r power-sim, echo = T}
+power_sim <- function(N,
+                      mu_1,
+                      mu_0,
+                      sd_1,
+                      sd_0,
+                      pi = 0.5,
+                      alpha = 0.05,
+                      n_sim = 1000L,
+                      seed = 20230213L) {
+  # Set seed
+  set.seed(seed)
+  
+  # Replicate simulations -- everything inside {} -- n_sim times
+  num_sig <- replicate(n_sim, {
+    # Generate potential outcomes
+    Y0 <- rnorm(N, mu_0, sd_0)
+    Y1 <- rnorm(N, mu_1, sd_1)
+    
+    # Custom treatment assignment
+    D <- randomizr::complete_ra(N, prob = pi)
+    
+    # Data frame, including treatment and revealed outcomes
+    dat <- data.frame(
+      D = D,
+      Y = dplyr::if_else(D == 1, Y1, Y0)
+    )
+    
+    # Custom inference method
+    est <- fixest::feols(Y ~ D, data = dat, se = "hetero")
+    
+    # Extract and return p-value
+    (est$coeftable["D", "Pr(>|t|)"] < alpha) %>%
+      return()
+  })
+  
+  # Return power (proportion of significant findings)
+  return(mean(num_sig))
+}
+```
+
+```{r power-sim-function}
+power_sim <- function(N,
+                      mu_1,
+                      mu_0,
+                      sd_1,
+                      sd_0,
+                      pi = 0.5,
+                      alpha = 0.05,
+                      n_sim = 1000L,
+                      seed = 20230213L) {
+  # Set seed
+  set.seed(seed)
+  
+  # Replicate simulations -- everything inside {} -- n_sim times
+  num_sig <- replicate(n_sim, {
+    # Generate potential outcomes
+    Y0 <- rnorm(N, mu_0, sd_0)
+    Y1 <- rnorm(N, mu_1, sd_1)
+    
+    # Custom treatment assignment
+    D <- randomizr::complete_ra(N, prob = pi)
+    
+    # Data frame, including treatment and revealed outcomes
+    dat <- data.frame(
+      D = D,
+      Y = dplyr::if_else(D == 1, Y1, Y0)
+    )
+    
+    # Custom inference method
+    est <- fixest::feols(Y ~ D, data = dat, se = "hetero")
+    
+    # Extract and return p-value
+    (est$coeftable["D", "Pr(>|t|)"] < alpha) %>%
+      return()
+  })
+  
+  # Return power (proportion of significant findings)
+  return(mean(num_sig))
+}
+```
+
+### Application: Power for a sequence of $N$
+
+```{r power-calc-seq, exercise = T, exercise.timelimit = 120, exercise.setup = "power-sim-function"}
+## Sample size sequence
+N_seq <- seq(250, 2000, 250)
+
+## Apply function sequentially
+power <- sapply(N_seq, function(N) {
+  power_sim(
+  N = N,
+  mu_0 = 1,
+  sd_0 = 0.75,
+  mu_1 = 1.2,
+  sd_1 = 1.25,
+  n_sim = 200L
+)
+})
+
+## View output
+dplyr::bind_cols(
+  N = N_seq,
+  power = power
+)
+```
+
+## Summary
+
+### Main take-aways
+
+- Power simulation is a powerful tool. Its main strength is flexibility.
+- These benefits come at the expense of some effort of setting up the simulation pipeline. And possibly some longish computation times.
+
+### Further reading
+
+[Huntington-Klein, Nick. 2021. Simulation for Power Analysis. https://nickch-k.github.io.](https://nickch-k.github.io/EconometricsSlides/Week_08/Power_Simulations.html)

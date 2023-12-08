@@ -1,0 +1,40 @@
+Package: poweranalysis
+Type: Package
+Title: Exercises, Functions, and Data for the Workshop "Power Analysis for Social Science Research"
+Version: 0.1.0
+Authors@R:
+    c(person(given = "Denis",
+             family = "Cohen",
+             email = "denis.cohen@uni-mannheim.de",
+             role = c("cre", "aut")),
+      person(given = "Alexander",
+             family = "Wenz",
+             email = "a.wenz@uni-mannheim.de",
+             role = c("aut"))
+             )
+Maintainer: Denis Cohen <denis.cohen@uni-mannheim.de>
+Description: The \code{poweranalysis} package provides a collection of interactive learnr materials for the workshop "Power Analysis for Social Science Research".
+Depends: R (>= 3.5.0)
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+VignetteBuilder:
+    knitr
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Biarch: true
+Imports:
+    tidyverse,
+    dplyr,
+    tibble,
+    knitr,
+    ggplot2,
+    viridisLite,
+    randomizr,
+    pwr,
+    cobalt,
+    cjoint,
+    pacman,
+    fixest
+Remotes: 
+    github::m-freitag/cjpowR
